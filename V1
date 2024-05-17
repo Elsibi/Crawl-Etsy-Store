@@ -1,0 +1,79 @@
+import csv
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+from selenium.common.exceptions import NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
+import re
+
+
+def setup_driver():
+    """Setup Chrome WebDriver with specific user profile settings."""
+    chrome_options = Options()
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    profile_path = "C:/Users/ADmin/AppData/Local/Google/Chrome/User Data/Profile 126"
+    chrome_options.add_argument(f"user-data-dir={profile_path}")
+
+    # Automatically download and setup the ChromeDriver
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    return driver
+
+
+def scrape_etsy_products():
+    """Scrapes product names, links, and prices from Etsy, removing duplicates based on listing ID and image URL."""
+    driver = setup_driver()
+    base_url = 'https://www.etsy.com/shop/DesignArtATX?ref=items-pagination&page='
+
+    # CSV file setup
+    csv_file_path = 'C:/Users/ADmin/Downloads/etsy_listings.csv'
+    seen_entries = set()  # Set to track already processed listing ID and image URL pairs
+
+    with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Listing ID', 'Title', 'Image URL'])
+
+        for page in range(1, 20):  # Pages 1 to 20
+            url = f'{base_url}{page}'
+            driver.get(url)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '.listing-card-experimental-style'))
+            )
+
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            listings = soup.find_all('div', {'class': 'listing-card-experimental-style'})
+
+            for listing in listings:
+                try:
+                    # Lấy listing ID
+                    listing_id = listing['data-listing-id']
+
+                    # Lấy title
+                    title = listing.find('h3', {'class': 'v2-listing-card__title'}).get_text(strip=True)
+
+                    # Lấy image URL
+                    img_tag = listing.find('img', {'class': 'wt-object-fit-cover'})
+                    image_url = img_tag['src'] if img_tag else 'N/A'
+                    # Replace parts of the image URL
+                    image_url = re.sub(r'il_340x270|il_300x300', 'il_fullxfull', image_url)
+
+                    # Kiểm tra trùng lặp
+                    entry = (listing_id, image_url)
+                    if entry in seen_entries:
+                        continue  # Bỏ qua nếu đã xử lý
+                    seen_entries.add(entry)
+
+                    writer.writerow([listing_id, title, image_url])
+                except (TypeError, AttributeError):
+                    continue  # Bỏ qua các listing có thể thiếu thông tin
+
+    driver.quit()
+
+
+if __name__ == "__main__":
+    scrape_etsy_products()
